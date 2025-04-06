@@ -14,7 +14,7 @@ model = None
 if gemini_api_key:
     try:
         genai.configure(api_key=gemini_api_key)
-        model = genai.GenerativeModel("gemini-1.5-pro")
+        model = genai.GenerativeModel("gemini-1.0-pro")  # ✅ แก้ชื่อโมเดลให้ถูกต้อง
         st.success("Gemini API Key successfully configured.")
     except Exception as e:
         st.error(f"An error occurred while setting up the Gemini model: {e}")
@@ -53,23 +53,36 @@ if user_input := st.chat_input("Type your message here..."):
     if model:
         try:
             if st.session_state.uploaded_data is not None and analyze_data_checkbox:
-                if "analyze" in user_input.lower() or "insight" in user_input.lower():
-                    # Describe data for AI analysis
-                    data_description = st.session_state.uploaded_data.describe().to_string()
-                    prompt = f"Analyze the following dataset and provide insights:\n\n{data_description}"
+                df = st.session_state.uploaded_data
 
+                if "analyze" in user_input.lower() or "insight" in user_input.lower():
+                    # ✅ ส่งข้อมูลจริงไปยัง Gemini
+                    data_description = df.describe(include="all").to_string()
+                    data_head = df.head(5).to_string()
+
+                    prompt = f"""
+The user uploaded a CSV dataset. Below is the summary and the first few rows:
+
+Summary Statistics:
+{data_description}
+
+Sample Rows:
+{data_head}
+
+Now answer the following question based on the data:
+
+{user_input}
+"""
                     response = model.generate_content(prompt)
                     bot_response = response.text
-
-                    st.session_state.chat_history.append(("assistant", bot_response))
-                    st.chat_message("assistant").markdown(bot_response)
                 else:
-                    # Normal conversation
+                    # 🔁 ปล่อยให้ Gemini ตอบคำถามทั่วไป
                     response = model.generate_content(user_input)
                     bot_response = response.text
 
-                    st.session_state.chat_history.append(("assistant", bot_response))
-                    st.chat_message("assistant").markdown(bot_response)
+                st.session_state.chat_history.append(("assistant", bot_response))
+                st.chat_message("assistant").markdown(bot_response)
+
             elif not analyze_data_checkbox:
                 bot_response = "Data analysis is disabled. Please select the 'Analyze CSV Data with AI' checkbox to enable analysis."
                 st.session_state.chat_history.append(("assistant", bot_response))

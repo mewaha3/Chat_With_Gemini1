@@ -1,96 +1,70 @@
 import streamlit as st
-import pandas as pd
 import google.generativeai as genai
+import pandas as pd
 
-# กำหนด API Key
-genai.configure(api_key=st.secrets['gemini_api_key'])
+st.set_page_config(page_title="Gemini Chatbot with CSV", layout="centered")
 
-model = genai.GenerativeModel('gemini-2.0-flash-lite')
+try:
+    key = st.secrets['gemini_api_key']
+    genai.configure(api_key=key)
+    model = genai.GenerativeModel('gemini-2.0-flash-lite')
 
-st.title("🔍 Gemini Data Analyst Bot")
-st.markdown("อัปโหลดไฟล์ข้อมูลและถามคำถามเกี่ยวกับข้อมูลได้เลย")
+    # เตรียม session state
+    if "chat" not in st.session_state:
+        st.session_state.chat = model.start_chat(history=[])
+    if "df" not in st.session_state:
+        st.session_state.df = None
+    if "df_name" not in st.session_state:
+        st.session_state.df_name = "uploaded_df"
 
-# Upload CSV
-data_file = st.file_uploader("📂 Upload Transactions CSV", type="csv")
-dict_file = st.file_uploader("📂 Upload Data Dictionary CSV", type="csv")
+    st.title("📊 Gemini Pro Chatbot + CSV Analyzer")
 
-# รับคำถามจากผู้ใช้
-question = st.text_input("💬 What is your question about the data?")
+    # อัปโหลดไฟล์ CSV
+    uploaded_file = st.file_uploader("📂 Upload CSV file to analyze", type="csv")
+    if uploaded_file:
+        st.session_state.df = pd.read_csv(uploaded_file)
+        st.success("✅ File uploaded successfully!")
+        st.write("🔍 Sample Data:")
+        st.dataframe(st.session_state.df.head())
 
-# เริ่มทำงานเมื่ออัปโหลดครบและมีคำถาม
-if data_file and dict_file and question:
-    try:
-        # โหลด DataFrame
-        transaction_df = pd.read_csv(data_file)
-        data_dict_df = pd.read_csv(dict_file)
+    # ฟังก์ชันแปลง role
+    def role_to_streamlit(role: str) -> str:
+        return 'assistant' if role == 'model' else role
 
-        df_name = 'transaction_df'
-        example_record = transaction_df.head(2).to_string()
-        data_dict_text = '\n'.join(
-            '- ' + data_dict_df['column_name'] + ': ' +
-            data_dict_df['data_type'] + '. ' +
-            data_dict_df['description']
-        )
+    # แสดงประวัติแชท
+    for message in st.session_state.chat.history:
+        with st.chat_message(role_to_streamlit(message.role)):
+            st.markdown(message.parts[0].text)
 
-        # 🧠 Prompt สำหรับสร้างโค้ด
-        prompt = f"""
-You are a helpful Python code generator.
-Your goal is to write Python code snippets based on the user's question
-and the provided DataFrame information.
+    # กล่องแชท
+    if prompt := st.chat_input("💬 Ask about your data or anything..."):
 
-Here's the context:
+        # ถ้ามีไฟล์อยู่ ก็แนบข้อมูลตัวอย่างเข้าไปใน prompt
+        if st.session_state.df is not None:
+            df = st.session_state.df
+            df_name = st.session_state.df_name
+            example_record = df.head(3).to_string()
+            full_prompt = f"""
+The user uploaded a DataFrame named `{df_name}`. Below are the first 3 rows:
 
-**User Question:**
-{question}
-
-**DataFrame Name:**
-{df_name}
-
-**DataFrame Details:**
-{data_dict_text}
-
-**Sample Data (Top 2 Rows):**
 {example_record}
 
-**Instructions:**
-1. Write Python code that addresses the user's question by querying or manipulating the DataFrame.
-2. **Crucially, use the `exec()` function to execute the generated code.**
-3. Do not import pandas
-4. Change date column type to datetime
-5. **Store the result of the executed code in a variable named `ANSWER`.**
-6. Assume the DataFrame is already loaded into a pandas DataFrame object named `{df_name}`.
+Now answer the user's question based on this data:
+
+{prompt}
 """
-
-        # เรียก Gemini ให้เขียนโค้ด
-        response = model.generate_content(prompt)
-        generated_code = response.text.replace("```python", "").replace("```", "")
-        st.subheader("💡 Generated Code")
-        st.code(generated_code, language='python')
-
-        # รันโค้ด
-        local_vars = {df_name: transaction_df}
-        exec(generated_code, {}, local_vars)
-
-        if "ANSWER" in local_vars:
-            answer = local_vars["ANSWER"]
-            st.subheader("📊 Answer")
-            st.write(answer)
-
-            # ให้ Gemini อธิบายผล
-            explanation_prompt = f'''
-The user asked: {question}
-Here is the result: {answer}
-
-Please summarize the result in plain English and give your opinion on what this customer might want.
-'''
-            explain_response = model.generate_content(explanation_prompt)
-            st.subheader("🧠 Explanation from Gemini")
-            st.markdown(explain_response.text)
-
         else:
-            st.warning("❌ No 'ANSWER' variable was found in generated code.")
+            full_prompt = prompt
 
-    except Exception as e:
-        st.error(f"⚠️ Error occurred: {e}")
-else:
-    st.info("📌 กรุณาอัปโหลดทั้งสองไฟล์และกรอกคำถามก่อนเริ่ม")
+        # แสดงคำถาม
+        st.chat_message("user").markdown(prompt)
+
+        # ส่ง prompt ไปให้ Gemini
+        response = st.session_state.chat.send_message(full_prompt)
+
+        # แสดงคำตอบ
+        with st.chat_message("assistant"):
+            st.markdown(response.text)
+
+except Exception as e:
+    st.error(f"An error occurred: {e}")

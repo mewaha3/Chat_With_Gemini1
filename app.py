@@ -1,70 +1,125 @@
+
 import streamlit as st
-import google.generativeai as genai
 import pandas as pd
+import google.generativeai as genai
+import traceback
 
-st.set_page_config(page_title="Gemini Chatbot with CSV", layout="centered")
+# ------------------------ Setup ------------------------
 
-try:
-    key = st.secrets['gemini_api_key']
-    genai.configure(api_key=key)
-    model = genai.GenerativeModel('gemini-2.0-flash-lite')
+st.set_page_config(page_title="Gemini Chatbot with Data", layout="centered")
 
-    # เตรียม session state
-    if "chat" not in st.session_state:
-        st.session_state.chat = model.start_chat(history=[])
-    if "df" not in st.session_state:
-        st.session_state.df = None
-    if "df_name" not in st.session_state:
-        st.session_state.df_name = "uploaded_df"
+genai.configure(api_key=st.secrets["gemini_api_key"])
+model = genai.GenerativeModel("gemini-2.0-flash-lite")
 
-    st.title("📊 Gemini Pro Chatbot + CSV Analyzer")
+# ------------------------ Session State ------------------------
 
-    # อัปโหลดไฟล์ CSV
-    uploaded_file = st.file_uploader("📂 Upload CSV file to analyze", type="csv")
-    if uploaded_file:
-        st.session_state.df = pd.read_csv(uploaded_file)
+if "chat" not in st.session_state:
+    st.session_state.chat = []
+
+if "df" not in st.session_state:
+    st.session_state.df = None
+
+if "df_name" not in st.session_state:
+    st.session_state.df_name = "uploaded_df"
+
+# ------------------------ UI ------------------------
+
+st.title("🤖 Gemini Chatbot + CSV Data Analysis")
+st.caption("อัปโหลดไฟล์ข้อมูลแล้วถามคำถามเพื่อให้ Gemini ช่วยวิเคราะห์")
+
+# Upload CSV
+uploaded_file = st.file_uploader("📂 Upload your CSV file", type="csv")
+if uploaded_file:
+    try:
+        df = pd.read_csv(uploaded_file)
+        st.session_state.df = df
         st.success("✅ File uploaded successfully!")
-        st.write("🔍 Sample Data:")
-        st.dataframe(st.session_state.df.head())
+        st.dataframe(df.head())
+    except Exception as e:
+        st.error(f"❌ Error loading file: {e}")
 
-    # ฟังก์ชันแปลง role
-    def role_to_streamlit(role: str) -> str:
-        return 'assistant' if role == 'model' else role
+# Show Chat History
+for msg in st.session_state.chat:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-    # แสดงประวัติแชท
-    for message in st.session_state.chat.history:
-        with st.chat_message(role_to_streamlit(message.role)):
-            st.markdown(message.parts[0].text)
+# ------------------------ Chat Input ------------------------
 
-    # กล่องแชท
-    if prompt := st.chat_input("💬 Ask about your data or anything..."):
+if prompt := st.chat_input("💬 ถามข้อมูลในไฟล์ หรือคำถามทั่วไปก็ได้..."):
+    st.session_state.chat.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-        # ถ้ามีไฟล์อยู่ ก็แนบข้อมูลตัวอย่างเข้าไปใน prompt
+    try:
         if st.session_state.df is not None:
             df = st.session_state.df
             df_name = st.session_state.df_name
-            example_record = df.head(3).to_string()
-            full_prompt = f"""
-The user uploaded a DataFrame named `{df_name}`. Below are the first 3 rows:
+            sample_data = df.head(2).to_string()
 
-{example_record}
+            # Gemini Prompt
+            prompt_code = f"""
+You are a helpful Python code generator.
+Your goal is to write Python code snippets based on the user's question
+and the provided DataFrame information.
 
-Now answer the user's question based on this data:
-
+**User Question:**
 {prompt}
+
+**DataFrame Name:**
+{df_name}
+
+**Sample Data (Top 2 Rows):**
+{sample_data}
+
+**Instructions:**
+1. Write Python code to answer the question using the DataFrame.
+2. Use `exec()` to execute the code.
+3. Store the result in a variable named `ANSWER`.
+4. Do NOT import pandas or reload the data.
+
+Example:
+
+```python
+query_result = {df_name}[{df_name}['age'] > 30]
+ANSWER = query_result
+```
 """
+
+            # Generate Code
+            response = model.generate_content(prompt_code)
+            code_raw = response.text.strip().replace("```python", "").replace("```", "")
+
+            with st.chat_message("assistant"):
+                st.markdown("🧠 **Generated Code:**")
+                st.code(code_raw, language="python")
+
+                # Execute Code
+                local_env = {df_name: df}
+                exec(code_raw, {}, local_env)
+
+                # Get Result
+                answer = local_env.get("ANSWER", "❌ No variable named `ANSWER` found.")
+                st.markdown("✅ **Result:**")
+                st.write(answer)
+
+            # Save to chat history
+            st.session_state.chat.append({
+                "role": "assistant",
+                "content": f"Here's the result based on your question:\n\n```
+{answer}
+```"
+            })
+
         else:
-            full_prompt = prompt
+            st.warning("⚠️ Please upload a CSV file before asking data-related questions.")
 
-        # แสดงคำถาม
-        st.chat_message("user").markdown(prompt)
-
-        # ส่ง prompt ไปให้ Gemini
-        response = st.session_state.chat.send_message(full_prompt)
-
-        # แสดงคำตอบ
-        with st.chat_message("assistant"):
-            st.markdown(response.text)
-
-except Exception as e:
-    st.error(f"An error occurred: {e}")
+    except Exception as e:
+        err_msg = traceback.format_exc()
+        st.error("❌ Error occurred while running the code.")
+        st.exception(err_msg)
+        st.session_state.chat.append({
+            "role": "assistant",
+            "content": f"❌ เกิดข้อผิดพลาด:\n\n```
+{e}
+```"
+        })

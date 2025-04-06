@@ -55,9 +55,14 @@ if user_input := st.chat_input("Type your question about the data..."):
             if st.session_state.uploaded_data is not None and analyze_data_checkbox:
                 df = st.session_state.uploaded_data.copy()
 
-                # Create prompt with structure + data
+                # Build context from columns
                 column_info = ", ".join(f"{col} ({df[col].dtype})" for col in df.columns)
-                sample_rows = df.head(10).to_csv(index=False)
+
+                # Send entire data if small, otherwise limit to 500 rows
+                if len(df) <= 500:
+                    data_text = df.to_csv(index=False)
+                else:
+                    data_text = df.head(500).to_csv(index=False)
 
                 prompt = f"""
 You are a helpful data analysis assistant.
@@ -65,21 +70,22 @@ You are a helpful data analysis assistant.
 The user uploaded a CSV file with the following columns:
 {column_info}
 
-Here are the first 10 rows:
-{sample_rows}
+Here is the dataset (up to 500 rows shown):
+{data_text}
 
-Using this data, please answer the question:
+Using this data, please answer the following question:
 {user_input}
 """
 
                 response = model.generate_content(prompt)
                 bot_response = response.text
             else:
-                # Chatbot mode only
-                response = model.generate_content(user_input)
+                # Fallback to normal conversation
+                prompt = user_input
+                response = model.generate_content(prompt)
                 bot_response = response.text
 
-            # Show and store assistant response
+            # Store and show bot reply
             st.session_state.chat_history.append(("assistant", bot_response))
             st.chat_message("assistant").markdown(bot_response)
 

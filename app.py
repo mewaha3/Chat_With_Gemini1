@@ -14,7 +14,7 @@ model = None
 if gemini_api_key:
     try:
         genai.configure(api_key=gemini_api_key)
-        model = genai.GenerativeModel("gemini-1.0-pro")  # ✅ แก้ชื่อโมเดลให้ถูกต้อง
+        model = genai.GenerativeModel("gemini-1.5-pro")  # ✅ แก้ชื่อโมเดลให้ถูกต้อง
         st.success("Gemini API Key successfully configured.")
     except Exception as e:
         st.error(f"An error occurred while setting up the Gemini model: {e}")

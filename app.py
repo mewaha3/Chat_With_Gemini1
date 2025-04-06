@@ -62,7 +62,7 @@ if user_input := st.chat_input("Type your question about the data..."):
                 if len(df) <= 500:
                     data_text = df.to_csv(index=False)
                 else:
-                    data_text = df.head(500).to_csv(index=False)
+                    data_text = df.head(2000).to_csv(index=False)
 
                 prompt = f"""
 You are a helpful data analysis assistant.

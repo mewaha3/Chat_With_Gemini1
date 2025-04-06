@@ -14,7 +14,7 @@ model = None
 if gemini_api_key:
     try:
         genai.configure(api_key=gemini_api_key)
-        model = genai.GenerativeModel("gemini-1.5-pro")  # ✅ แก้ชื่อโมเดลให้ถูกต้อง
+        model = genai.GenerativeModel("gemini-1.5-pro")  # ใช้ชื่อโมเดลที่ถูกต้อง
         st.success("Gemini API Key successfully configured.")
     except Exception as e:
         st.error(f"An error occurred while setting up the Gemini model: {e}")
@@ -54,43 +54,35 @@ if user_input := st.chat_input("Type your message here..."):
         try:
             if st.session_state.uploaded_data is not None and analyze_data_checkbox:
                 df = st.session_state.uploaded_data
+                df_name = "uploaded_data"
 
-                if "analyze" in user_input.lower() or "insight" in user_input.lower():
-                    # ✅ ส่งข้อมูลจริงไปยัง Gemini
-                    data_description = df.describe(include="all").to_string()
-                    data_head = df.head(5).to_string()
+                # ✅ สร้าง prompt พร้อมข้อมูลจาก DataFrame จริง
+                column_info = ", ".join(f"{col} ({df[col].dtype})" for col in df.columns)
+                data_head = df.head(10).to_csv(index=False)
 
-                    prompt = f"""
-The user uploaded a CSV dataset. Below is the summary and the first few rows:
+                prompt = f"""
+You are a data analysis assistant. The user uploaded a CSV file with the following columns:
+{column_info}
 
-Summary Statistics:
-{data_description}
-
-Sample Rows:
+Here are the first 10 rows of the data:
 {data_head}
 
-Now answer the following question based on the data:
+Now answer the following question using this data:
 
 {user_input}
 """
-                    response = model.generate_content(prompt)
-                    bot_response = response.text
-                else:
-                    # 🔁 ปล่อยให้ Gemini ตอบคำถามทั่วไป
-                    response = model.generate_content(user_input)
-                    bot_response = response.text
 
-                st.session_state.chat_history.append(("assistant", bot_response))
-                st.chat_message("assistant").markdown(bot_response)
+                response = model.generate_content(prompt)
+                bot_response = response.text
 
-            elif not analyze_data_checkbox:
-                bot_response = "Data analysis is disabled. Please select the 'Analyze CSV Data with AI' checkbox to enable analysis."
-                st.session_state.chat_history.append(("assistant", bot_response))
-                st.chat_message("assistant").markdown(bot_response)
             else:
-                bot_response = "Please upload a CSV file first, then ask me to analyze it."
-                st.session_state.chat_history.append(("assistant", bot_response))
-                st.chat_message("assistant").markdown(bot_response)
+                # ถ้าไม่ได้ให้วิเคราะห์ไฟล์ ใช้แค่ข้อความถามตอบปกติ
+                prompt = user_input
+                response = model.generate_content(prompt)
+                bot_response = response.text
+
+            st.session_state.chat_history.append(("assistant", bot_response))
+            st.chat_message("assistant").markdown(bot_response)
 
         except Exception as e:
             st.error(f"An error occurred while generating the response: {e}")

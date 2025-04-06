@@ -1,22 +1,31 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
-import textwrap
 
-# ตั้งค่า API Key
-genai.configure(api_key=st.secrets['gemini_api_key'])
+# ตั้งค่า Gemini API Key
+genai.configure(api_key=st.secrets["gemini_api_key"])
 
 # สร้างโมเดล
-model = genai.GenerativeModel('gemini-2.0-flash-lite')
+model = genai.GenerativeModel("gemini-2.0-flash-lite")
 
-# ส่วน UI
-st.title("Gemini AI - DataFrame Question Answering")
+# UI ส่วนหัว
+st.title("🧠 Gemini AI: ถามตอบข้อมูลในไฟล์ CSV")
 
-uploaded_data = st.file_uploader("📂 Upload Transaction CSV", type="csv", key="data")
-uploaded_dict = st.file_uploader("📂 Upload Data Dictionary CSV", type="csv", key="dict")
+# อัปโหลดไฟล์
+st.markdown("### 📂 Upload Files")
+uploaded_data = st.file_uploader("**Upload Transaction CSV File**", type="csv", key="data")
+uploaded_dict = st.file_uploader("**Upload Data Dictionary CSV File**", type="csv", key="dict")
 
-question = st.text_input("❓ Enter your question about the data")
+# กรอกคำถาม
+question = st.text_input("❓ ถามคำถามเกี่ยวกับข้อมูลของคุณที่นี่")
 
+# ตรวจสอบว่าไฟล์ถูกอัปโหลดหรือยัง
+if uploaded_data:
+    st.success("✅ Transaction file uploaded")
+if uploaded_dict:
+    st.success("✅ Data dictionary uploaded")
+
+# ตรวจสอบว่าทุกอย่างพร้อมแล้ว
 if uploaded_data and uploaded_dict and question:
     try:
         # โหลดข้อมูล
@@ -31,7 +40,7 @@ if uploaded_data and uploaded_dict and question:
             data_dict_df['description']
         )
 
-        # สร้าง prompt
+        # สร้าง Prompt
         prompt = f"""
 You are a helpful Python code generator.
 Your goal is to write Python code snippets based on the user's question
@@ -59,31 +68,27 @@ Here's the context:
 5. **Store the result of the executed code in a variable named `ANSWER`.**
 6. Assume the DataFrame is already loaded into a pandas DataFrame object named `{df_name}`.
 7. Keep the generated code concise and focused on answering the question.
-8. If the question requires a specific output format, ensure the `query_result` variable holds that format.
-
-**Example:**
-If the user asks: "Show me the rows where the 'age' column is greater than 30."
-
-```python
-query_result = {df_name}[{df_name}['age'] > 30]
 """
 
-        # ส่ง prompt เข้า Gemini
+        # ส่งไปให้โมเดล Gemini
         response = model.generate_content(prompt)
         generated_code = response.text.replace("```python", "").replace("```", "")
 
-        st.subheader("💡 Generated Code:")
+        st.subheader("🧾 Generated Python Code")
         st.code(generated_code, language="python")
 
-        # รันโค้ดที่ได้รับ
+        # รันโค้ดด้วย exec
         local_vars = {df_name: transaction_df}
         exec(generated_code, {}, local_vars)
 
-        if 'ANSWER' in local_vars:
-            st.subheader("📊 Answer:")
-            st.write(local_vars['ANSWER'])
+        if "ANSWER" in local_vars:
+            st.subheader("📊 Answer")
+            st.write(local_vars["ANSWER"])
         else:
-            st.warning("No variable named 'ANSWER' found in generated code.")
+            st.warning("No variable named 'ANSWER' was created in the generated code.")
 
     except Exception as e:
-        st.error(f"Error occurred: {e}")
+        st.error(f"❌ Error: {e}")
+
+else:
+    st.info("กรุณาอัปโหลดไฟล์ทั้งสองและกรอกคำถามก่อนเริ่ม")

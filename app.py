@@ -1,107 +1,129 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
-import textwrap
 
-# -------------------- Setup --------------------
-st.set_page_config(page_title="Gemini CSV Chatbot", page_icon="📊")
-st.title("📊 Gemini CSV Chatbot with Data Dictionary")
-st.write("Upload your **CSV data** and **data dictionary**, then ask any data question!")
+# -------------------- Streamlit UI Setup --------------------
+st.set_page_config(page_title="Gemini Data Chatbot", page_icon="🤖")
+st.title("🤖 Gemini CSV Chatbot")
+st.write("Upload your **CSV data** and optionally a **data dictionary**, then ask any question about your data!")
 
-# Gemini API Key
+# -------------------- Gemini API Key --------------------
 api_key = st.text_input("🔐 Enter your Gemini API Key", type="password")
 if api_key:
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-1.5-pro")
+else:
+    st.warning("Please provide your Gemini API Key.")
 
-# -------------------- Upload Files --------------------
-st.markdown("### 📂 Upload Files")
+# -------------------- File Upload Section --------------------
+st.markdown("### 📁 Upload Your Files")
 data_file = st.file_uploader("Upload your main CSV data file", type=["csv"], key="data")
-dict_file = st.file_uploader("Upload your data dictionary CSV", type=["csv"], key="dict")
+dict_file = st.file_uploader("Optional: Upload your data dictionary CSV", type=["csv"], key="dict")
 
-# -------------------- Process Files --------------------
-if data_file and dict_file and api_key:
+# -------------------- Process Uploaded Files --------------------
+if data_file and api_key:
     df = pd.read_csv(data_file)
     df_name = "df"
-    data_dict_df = pd.read_csv(dict_file)
 
-    # สร้างคำอธิบายคอลัมน์จาก data dictionary
-    data_dict_text = '\n'.join(
-        f"- {row['column_name']}: {row['data_type']}. {row['description']}"
-        for _, row in data_dict_df.iterrows()
-    )
+    # If dictionary is uploaded
+    if dict_file:
+        dict_df = pd.read_csv(dict_file)
+        data_dict_text = '\n'.join(
+            f"- {row['column_name']}: {row['data_type']}. {row['description']}"
+            for _, row in dict_df.iterrows()
+        )
+    else:
+        # Auto generate context from DataFrame itself
+        data_dict_text = '\n'.join(
+            f"- {col}: {dtype}" for col, dtype in df.dtypes.items()
+        )
 
-    # แสดงตัวอย่างข้อมูล
-    st.subheader("📌 Data Preview")
-    st.dataframe(df.head(2))
+    # -------------------- Display Info --------------------
+    st.subheader("🔍 Data Preview")
+    st.dataframe(df.head(3))
 
-    st.subheader("📌 Data Dictionary Summary")
+    st.subheader("📖 Data Dictionary / Inferred Info")
     st.code(data_dict_text)
 
-    # -------------------- Chat Interface --------------------
+    # -------------------- Chat Area --------------------
     question = st.chat_input("💬 Ask a question about your data...")
     if question:
         with st.chat_message("user"):
             st.markdown(question)
 
-        # สร้าง prompt ให้ Gemini ตาม format
-        example_record = df.head(2).to_string()
+        # Create prompt for Gemini
+        sample_data = df.head(2).to_string()
         prompt = f"""
-You are a helpful Python code generator.
-Your goal is to write Python code snippets based on the user's question
-and the provided DataFrame information.
+You are a Python data assistant.
 
-Here's the context:
+Your task is to help answer the user's question using the provided DataFrame and column descriptions.
 
-**User Question:**
+### User Question:
 {question}
 
-**DataFrame Name:**
+### DataFrame Name:
 {df_name}
 
-**DataFrame Details:**
+### DataFrame Column Info:
 {data_dict_text}
 
-**Sample Data (Top 2 Rows):**
-{example_record}
+### Sample Data (Top 2 Rows):
+{sample_data}
 
-**Instructions:**
-1. Write Python code that addresses the user's question by querying or manipulating the DataFrame.
-2. Use the `exec()` function to execute the generated code.
-3. Do not import pandas.
-4. Change date column type to datetime if needed.
-5. Store the result in a variable named `ANSWER`.
-6. Assume the DataFrame is already loaded as `{df_name}`.
-7. Keep the code concise and focused on answering the question.
+### Instructions:
+1. Analyze and explain how you interpret the question.
+2. Write Python code that uses the DataFrame `{df_name}` to answer the question.
+3. Use the `exec()` function to run your code.
+4. Store the final result in a variable called `ANSWER`.
+5. Do not import pandas or reload data.
+6. Convert date columns to datetime if needed.
 
-Example:
-query_result = {df_name}[{df_name}['age'] > 30]
+Your response format should be:
+
+EXPLANATION:
+<Explanation>
+
+```python
+# Python code here
+```
 """
 
         try:
-            # ส่ง prompt ไปที่ Gemini
+            # Generate content from Gemini
             response = model.generate_content(prompt)
-            generated_code = response.text.replace("```python", "").replace("```", "")
-            
-            st.markdown("#### 🧠 Generated Code")
-            st.code(generated_code, language="python")
+            text = response.text
 
-            # Execute the generated code
+            # Split explanation and code
+            if "```python" in text:
+                explanation, code_block = text.split("```python")
+                code = code_block.replace("```", "").strip()
+            else:
+                explanation = "Could not detect explanation/code format properly."
+                code = ""
+
+            # Show explanation and code
+            st.markdown("### 🧠 Gemini Explanation")
+            st.markdown(explanation.strip())
+
+            st.markdown("### 💻 Generated Python Code")
+            st.code(code, language="python")
+
+            # Execute the code safely
             exec_locals = {df_name: df}
-            exec(generated_code, {}, exec_locals)
-            result = exec_locals.get("ANSWER")
+            exec(code, {}, exec_locals)
+            answer = exec_locals.get("ANSWER")
 
             with st.chat_message("assistant"):
-                st.markdown("### ✅ Result")
-                st.write(result)
+                st.markdown("### ✅ Answer")
+                st.write(answer)
 
-                # ถาม Gemini เพื่ออธิบายผลลัพธ์
-                explanation_prompt = f"The user asked: {question}\nHere is the result: {result}\nSummarize and explain:"
-                explanation = model.generate_content(explanation_prompt).text
-                st.markdown("### 📝 Explanation")
-                st.markdown(explanation)
+                # Ask Gemini to explain result
+                explain_result_prompt = f"The user asked: {question}\nHere is the result: {answer}\nSummarize and explain:"
+                final_explanation = model.generate_content(explain_result_prompt).text
+                st.markdown("### 📝 Explanation of Result")
+                st.markdown(final_explanation)
 
         except Exception as e:
-            st.error(f"❌ Error occurred while generating or running the code:\n{e}")
+            st.error(f"❌ Error while processing:\n{e}")
 else:
-    st.info("📥 Please upload both data and data dictionary files and provide your Gemini API Key.")
+    st.info("📥 Please upload a CSV file and enter your Gemini API Key to begin.")

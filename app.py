@@ -1,91 +1,101 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
+import textwrap
 
 # -------------------- Setup --------------------
-st.title("🐧 Gemini Chatbot with Full CSV Analysis")
-st.subheader("Upload your CSV file and ask any question")
+st.title("🧠 Gemini DataBot: Analyze CSV with AI")
+st.subheader("Upload your CSV file and ask questions in natural language")
 
-# Gemini API Key input
-gemini_api_key = st.text_input("Gemini API Key: ", placeholder="Type your API Key here...", type="password")
+# Input API Key
+api_key = st.text_input("🔐 Enter your Gemini API Key", type="password")
+if api_key:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-1.5-pro")
 
-# Initialize Gemini model
-model = None
-if gemini_api_key:
-    try:
-        genai.configure(api_key=gemini_api_key)
-        model = genai.GenerativeModel("gemini-1.5-pro")
-        st.success("Gemini API Key successfully configured.")
-    except Exception as e:
-        st.error(f"An error occurred while setting up the Gemini model: {e}")
+# -------------------- File Upload --------------------
+st.markdown("### 📂 Upload Required Files")
+col1, col2 = st.columns(2)
+with col1:
+    data_file = st.file_uploader("Upload Transactions CSV", type="csv", key="data")
+with col2:
+    dict_file = st.file_uploader("Upload Data Dictionary CSV", type="csv", key="dict")
 
-# -------------------- Session State --------------------
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "uploaded_data" not in st.session_state:
-    st.session_state.uploaded_data = None
+if data_file and dict_file:
+    df = pd.read_csv(data_file)
+    df_name = "df"
+    data_dict_df = pd.read_csv(dict_file)
 
-# -------------------- Show Chat History --------------------
-for role, message in st.session_state.chat_history:
-    st.chat_message(role).markdown(message)
+    # Format Data Dictionary
+    data_dict_text = '\n'.join(
+        '- ' + row['column_name'] + ': ' + row['data_type'] + '. ' + row['description']
+        for _, row in data_dict_df.iterrows()
+    )
 
-# -------------------- Upload CSV --------------------
-st.subheader("Upload CSV for Analysis")
-uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"])
+    # Sample record
+    example_record = df.head(2).to_string()
 
-if uploaded_file is not None:
-    try:
-        st.session_state.uploaded_data = pd.read_csv(uploaded_file)
-        st.success("✅ File uploaded successfully!")
-        st.write("### Preview of Uploaded Data")
-        st.dataframe(st.session_state.uploaded_data.head())
-    except Exception as e:
-        st.error(f"An error occurred while reading the file: {e}")
+    # -------------------- Chat Input --------------------
+    user_question = st.chat_input("Ask a question about your data...")
+    if user_question and api_key:
+        with st.chat_message("user"):
+            st.markdown(user_question)
 
-# -------------------- Enable AI Analysis --------------------
-analyze_data_checkbox = st.checkbox("Analyze CSV Data with AI")
+        # Build Prompt
+        prompt = f"""
+You are a helpful Python code generator.
+Your goal is to write Python code snippets based on the user's question
+and the provided DataFrame information.
 
-# -------------------- Chat Input --------------------
-if user_input := st.chat_input("Type your question about the data..."):
-    st.session_state.chat_history.append(("user", user_input))
-    st.chat_message("user").markdown(user_input)
+Here's the context:
 
-    if model:
-        try:
-            if st.session_state.uploaded_data is not None and analyze_data_checkbox:
-                df = st.session_state.uploaded_data.copy()
+**User Question:**
+{user_question}
 
-                # สรุปข้อมูล column
-                column_info = ", ".join(f"{col} ({df[col].dtype})" for col in df.columns)
+**DataFrame Name:**
+{df_name}
 
-                # ✅ ส่งข้อมูลทั้งไฟล์
-                data_text = df.to_csv(index=False)
+**DataFrame Details:**
+{data_dict_text}
 
-                # สร้าง prompt เต็ม
-                prompt = f"""
-You are a helpful data analysis assistant.
+**Sample Data (Top 2 Rows):**
+{example_record}
 
-The user uploaded a CSV file with the following columns:
-{column_info}
+**Instructions:**
+1. Write Python code that addresses the user's question by querying or manipulating the DataFrame.
+2. Use the `exec()` function to execute the generated code.
+3. Do not import pandas
+4. Change date column type to datetime
+5. Store the result of the executed code in a variable named `ANSWER`.
+6. Assume the DataFrame is already loaded as `{df_name}`.
+7. Keep the code concise and focused on the question.
 
-Here is the entire dataset:
-{data_text}
-
-Now please answer this question using the data:
-{user_input}
+Example:
+query_result = {df_name}[{df_name}['age'] > 30]
 """
 
-                response = model.generate_content(prompt)
-                bot_response = response.text
-            else:
-                # ถ้าไม่วิเคราะห์ไฟล์ ก็ถามทั่วไป
-                response = model.generate_content(user_input)
-                bot_response = response.text
+        try:
+            response = model.generate_content(prompt)
+            generated_code = response.text.replace("```python", "").replace("```", "")
+            st.markdown("#### 🧠 Generated Code")
+            st.code(generated_code, language="python")
 
-            st.session_state.chat_history.append(("assistant", bot_response))
-            st.chat_message("assistant").markdown(bot_response)
+            # Execute
+            exec_locals = {"df": df}
+            exec(generated_code, {}, exec_locals)
+            ANSWER = exec_locals.get("ANSWER")
+
+            with st.chat_message("assistant"):
+                st.markdown("### ✅ Answer")
+                st.write(ANSWER)
+
+                # Ask Gemini to explain
+                explain_prompt = f"The user asked: {user_question}\nHere is the result: {ANSWER}\nSummarize and explain:"
+                explanation = model.generate_content(explain_prompt).text
+                st.markdown("#### 📝 Explanation")
+                st.markdown(explanation)
 
         except Exception as e:
-            st.error(f"An error occurred while generating the response: {e}")
-    else:
-        st.warning("Please configure the Gemini API Key to enable chat responses.")
+            st.error(f"❌ Error: {e}")
+else:
+    st.info("Please upload both the transaction file and data dictionary to begin.")

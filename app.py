@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
+import matplotlib.pyplot as plt
 
 # -------------------- Streamlit UI Setup --------------------
 st.set_page_config(page_title="Gemini Data Chatbot", page_icon="🤖")
@@ -108,20 +109,31 @@ EXPLANATION:
             st.markdown("### 💻 Generated Python Code")
             st.code(code, language="python")
 
-            # Execute the code safely
-            exec_locals = {df_name: df}
+            # Execute the code safely with context for pd and plt
+            exec_locals = {df_name: df, 'pd': pd, 'plt': plt}
+            plt.clf()
             exec(code, {}, exec_locals)
             answer = exec_locals.get("ANSWER")
 
             with st.chat_message("assistant"):
-                st.markdown("### ✅ Answer")
-                st.write(answer)
+                if answer is not None:
+                    st.markdown("### ✅ Answer")
+                    st.write(answer)
+
+                # Show chart if exists
+                fig = plt.gcf()
+                if fig.get_axes():
+                    st.markdown("### 📊 Generated Chart")
+                    st.pyplot(fig)
 
                 # Ask Gemini to explain result
-                explain_result_prompt = f"The user asked: {question}\nHere is the result: {answer}\nSummarize and explain:"
-                final_explanation = model.generate_content(explain_result_prompt).text
-                st.markdown("### 📝 Explanation of Result")
-                st.markdown(final_explanation)
+                explain_prompt = f"The user asked: {question}\nHere is the result: {answer}\nSummarize and explain:"
+                try:
+                    explanation = model.generate_content(explain_prompt).text
+                    st.markdown("### 📝 Explanation of Result")
+                    st.markdown(explanation)
+                except Exception as e:
+                    st.warning(f"(Optional) Could not get explanation: {e}")
 
         except Exception as e:
             st.error(f"❌ Error while processing:\n{e}")
